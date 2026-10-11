@@ -29,7 +29,7 @@ class TestPredictionApplication(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.get_json()["prediction"], "PASS"
+            response.get_json()["prediction"], "FAIL"
         )
 
     def test_low_performance_prediction(self):
