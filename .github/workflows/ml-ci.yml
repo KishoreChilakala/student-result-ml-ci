@@ -39,6 +39,28 @@ jobs:
         
       - name: Run automated ML tests
         run: python -m unittest discover -v
+
+        
+      - name: Run prediction application tests
+        run: python -m unittest test_app.py -v
+
+      - name: Prepare release candidate
+        run: |
+          mkdir -p release_candidate
+          cp app.py release_candidate/
+          cp student_result_model.pkl release_candidate/
+          cp metrics.json release_candidate/
+          cp requirements.txt release_candidate/
+          printf "Student Result Prediction ML Application\nRun: python app.py\nEndpoint: POST /predict\n" > release_candidate/DEPLOYMENT.txt
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: student-result-ml-release
+          path: release_candidate/
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload validated ML artifacts
         uses: actions/upload-artifact@v7
         with:
