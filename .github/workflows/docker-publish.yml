@@ -1,0 +1,75 @@
+
+name: Build, Test and Publish Student Result Prediction
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: student-result-ml
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Build Docker image
+        run: docker build -t "$IMAGE_NAME:ci" .
+
+      - name: Start test container
+        run: |
+          docker run -d \
+            --name student-result-ci \
+            -p 5000:5000 \
+            "$IMAGE_NAME:ci"
+
+      - name: Test application endpoint
+        run: |
+          for attempt in {1..20}; do
+            if curl --fail --silent \
+              http://localhost:5000/; then
+              echo "Application test passed."
+              exit 0
+            fi
+            echo "Waiting for application..."
+            sleep 3
+          done
+          echo "Application test failed."
+          docker logs student-result-ci
+          exit 1
+
+      - name: Remove test container
+        if: always()
+        run: docker rm -f student-result-ci || true
+
+      - name: Prepare lowercase image name
+        run: |
+          IMAGE_ID="${REGISTRY}/${{ github.repository_owner }}/${IMAGE_NAME}"
+          IMAGE_ID=$(echo "$IMAGE_ID" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_ID=$IMAGE_ID" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login "$REGISTRY" \
+              -u "${{ github.actor }}" \
+              --password-stdin
+
+      - name: Tag tested image
+        run: |
+          docker tag "$IMAGE_NAME:ci" "$IMAGE_ID:latest"
+          docker tag "$IMAGE_NAME:ci" "$IMAGE_ID:sha-${{ github.sha }}"
+
+      - name: Publish tested image
+        run: |
+          docker push "$IMAGE_ID:latest"
+          docker push "$IMAGE_ID:sha-${{ github.sha }}"
