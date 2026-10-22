@@ -31,6 +31,7 @@ def health_check():
     return jsonify({
         "status": "ok",
         "service": "student-result-prediction",
+        "version": "2.0"
     })
 
 
