@@ -85,7 +85,7 @@ def log_request_end(response):
         (time.perf_counter() - g.start_time) * 1000
         if hasattr(g, "start_time") else 0
     )
-        if request.path != "/metrics":
+    if request.path != "/metrics":
         HTTP_REQUESTS.labels(
             method=request.method,
             path=request.path,
