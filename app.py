@@ -1,11 +1,4 @@
-from prometheus_client import (
-    Counter,
-    Histogram,
-    Gauge,
-    generate_latest,
-    CONTENT_TYPE_LATEST,
-)
-from flask import Response
+
 from pathlib import Path
 import logging
 import time
@@ -13,9 +6,18 @@ import uuid
 
 import joblib
 import pandas as pd
-from flask import Flask, jsonify, request, g
+from flask import Flask, Response, jsonify, request, g
+from prometheus_client import (
+    Counter,
+    Histogram,
+    Gauge,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
 
 app = Flask(__name__)
+
+# Prometheus metrics
 HTTP_REQUESTS = Counter(
     "student_api_http_requests_total",
     "Total HTTP requests received",
@@ -38,17 +40,21 @@ MODEL_LOADED = Gauge(
     "student_api_model_loaded",
     "Whether the prediction model loaded successfully",
 )
+
+# Logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s "
            "request_id=%(request_id)s %(message)s",
 )
 
+
 class RequestIdFilter(logging.Filter):
     def filter(self, record):
         if not hasattr(record, "request_id"):
             record.request_id = "-"
         return True
+
 
 for handler in logging.getLogger().handlers:
     handler.addFilter(RequestIdFilter())
@@ -83,8 +89,10 @@ def log_request_start():
 def log_request_end(response):
     elapsed_ms = (
         (time.perf_counter() - g.start_time) * 1000
-        if hasattr(g, "start_time") else 0
+        if hasattr(g, "start_time")
+        else 0
     )
+
     if request.path != "/metrics":
         HTTP_REQUESTS.labels(
             method=request.method,
@@ -108,6 +116,7 @@ def log_request_end(response):
         response.status_code,
         elapsed_ms,
     )
+
     return response
 
 
@@ -134,7 +143,10 @@ def load_model():
 
     except Exception:
         MODEL_LOADED.set(0)
-        logger.exception("event=model_load_failed model_file=%s", MODEL_PATH)
+        logger.exception(
+            "event=model_load_failed model_file=%s",
+            MODEL_PATH,
+        )
         raise
 
 
@@ -143,7 +155,7 @@ def health_check():
     return jsonify({
         "status": "ok",
         "service": "student-result-prediction",
-        "version": "2.1"
+        "version": "2.1",
     })
 
 
@@ -154,7 +166,7 @@ def predict():
     if not data:
         logger.warning("validation_error reason=missing_json_body")
         return jsonify({
-            "error": "JSON request body is required"
+            "error": "JSON request body is required",
         }), 400
 
     missing_fields = [
@@ -178,9 +190,11 @@ def predict():
             for feature in FEATURES
         }])
     except (TypeError, ValueError):
-        logger.warning("validation_error reason=non_numeric_features")
+        logger.warning(
+            "validation_error reason=non_numeric_features"
+        )
         return jsonify({
-            "error": "Feature values must be numeric"
+            "error": "Feature values must be numeric",
         }), 400
 
     try:
@@ -192,6 +206,7 @@ def predict():
         PREDICTIONS.labels(result="error").inc()
         logger.exception("event=prediction_failed")
         raise
+
     prediction = "PASS" if prediction_code == 1 else "FAIL"
 
     logger.info(
@@ -205,11 +220,14 @@ def predict():
         "prediction_code": prediction_code,
     })
 
+
 @app.get("/metrics")
 def metrics():
     return Response(
         response=generate_latest(),
         mimetype=CONTENT_TYPE_LATEST,
     )
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
