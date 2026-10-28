@@ -19,7 +19,7 @@ logging.basicConfig(
 class RequestIdFilter(logging.Filter):
     def filter(self, record):
         if not hasattr(record, "request_id"):
-            record.request_id = getattr(g, "request_id", "-")
+            record.request_id = "-"
         return True
 
 for handler in logging.getLogger().handlers:
