@@ -1,4 +1,11 @@
-
+from prometheus_client import (
+    Counter,
+    Histogram,
+    Gauge,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
+from flask import Response
 from pathlib import Path
 import logging
 import time
@@ -9,7 +16,28 @@ import pandas as pd
 from flask import Flask, jsonify, request, g
 
 app = Flask(__name__)
+HTTP_REQUESTS = Counter(
+    "student_api_http_requests_total",
+    "Total HTTP requests received",
+    ["method", "path", "status"],
+)
 
+HTTP_LATENCY = Histogram(
+    "student_api_http_request_duration_seconds",
+    "HTTP request duration in seconds",
+    ["method", "path"],
+)
+
+PREDICTIONS = Counter(
+    "student_api_predictions_total",
+    "Total prediction attempts",
+    ["result"],
+)
+
+MODEL_LOADED = Gauge(
+    "student_api_model_loaded",
+    "Whether the prediction model loaded successfully",
+)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s "
@@ -57,6 +85,17 @@ def log_request_end(response):
         (time.perf_counter() - g.start_time) * 1000
         if hasattr(g, "start_time") else 0
     )
+        if request.path != "/metrics":
+        HTTP_REQUESTS.labels(
+            method=request.method,
+            path=request.path,
+            status=str(response.status_code),
+        ).inc()
+
+        HTTP_LATENCY.labels(
+            method=request.method,
+            path=request.path,
+        ).observe(elapsed_ms / 1000.0)
 
     response.headers["X-Request-ID"] = getattr(
         g, "request_id", "-"
@@ -82,12 +121,21 @@ def handle_unexpected_error(error):
 
 
 def load_model():
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(
-            "student_result_model.pkl was not found. "
-            "Run the training pipeline first."
-        )
-    return joblib.load(MODEL_PATH)
+    try:
+        if not MODEL_PATH.exists():
+            raise FileNotFoundError(
+                "student_result_model.pkl was not found. "
+                "Run the training pipeline first."
+            )
+
+        model = joblib.load(MODEL_PATH)
+        MODEL_LOADED.set(1)
+        return model
+
+    except Exception:
+        MODEL_LOADED.set(0)
+        logger.exception("event=model_load_failed model_file=%s", MODEL_PATH)
+        raise
 
 
 @app.get("/")
@@ -135,8 +183,15 @@ def predict():
             "error": "Feature values must be numeric"
         }), 400
 
-    model = load_model()
-    prediction_code = int(model.predict(sample)[0])
+    try:
+        model = load_model()
+        prediction_code = int(model.predict(sample)[0])
+        PREDICTIONS.labels(result="success").inc()
+
+    except Exception:
+        PREDICTIONS.labels(result="error").inc()
+        logger.exception("event=prediction_failed")
+        raise
     prediction = "PASS" if prediction_code == 1 else "FAIL"
 
     logger.info(
@@ -150,6 +205,11 @@ def predict():
         "prediction_code": prediction_code,
     })
 
-
+@app.get("/metrics")
+def metrics():
+    return Response(
+        response=generate_latest(),
+        mimetype=CONTENT_TYPE_LATEST,
+    )
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
